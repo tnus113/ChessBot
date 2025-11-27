@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chess Bot Testing Arena</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #ffffff; color: rgb(0, 0, 0); margin: 0; padding: 20px; }
+        h1 { margin-bottom: 10px; }
+        #board { width: 400px; margin-bottom: 20px; }
+        .info { margin-top: 10px; font-size: 1.2em; }
+        .status { color: #f1c40f; font-weight: bold; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #27ae60; color: white; border: none; border-radius: 5px; margin-top: 10px; }
+        button:hover { background: #2ecc71; }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 600px) {
+            #board { width: 100%; max-width: 400px; }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🤖 Chess Bot AI</h1>
+    <div id="board"></div>
+    <div class="info">Trạng thái: <span id="status" class="status">Bạn đi trước (Trắng)</span></div>
+    <button id="resetBtn">Ván mới</button>
+
+    <!-- Import Libraries -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+    <script>
+        var board = null
+        var game = new Chess()
+        var $status = $('#status')
+
+        function onDragStart (source, piece, position, orientation) {
+            // Không cho phép kéo quân nếu game đã kết thúc
+            if (game.game_over()) return false
+
+            // Chỉ cho phép người chơi điều khiển quân Trắng (hoặc bên đi lượt này)
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false
+            }
+        }
+
+        function onDrop (source, target) {
+            // Kiểm tra nước đi có hợp lệ không (theo luật cờ vua)
+            var move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // Tự động phong Hậu cho đơn giản
+            })
+
+            // Nếu nước đi không hợp lệ, trả quân về chỗ cũ
+            if (move === null) return 'snapback'
+
+            updateStatus()
+            
+            // Sau khi người chơi đi xong, gọi Bot sau 250ms
+            window.setTimeout(makeBotMove, 250)
+        }
+
+        function onSnapEnd () {
+            board.position(game.fen())
+        }
+
+        function updateStatus () {
+            var status = ''
+            var moveColor = 'White'
+            if (game.turn() === 'b') {
+                moveColor = 'Black'
+            }
+
+            if (game.in_checkmate()) {
+                status = 'Game over, ' + moveColor + ' bị chiếu bí.'
+            } else if (game.in_draw()) {
+                status = 'Game over, Hòa.'
+            } else {
+                status = moveColor + ' đến lượt đi.'
+                if (game.in_check()) {
+                    status += ', ' + moveColor + ' đang bị chiếu!'
+                }
+            }
+            $status.html(status)
+        }
+
+        async function makeBotMove() {
+            if (game.game_over()) return;
+
+            $status.html("Bot đang suy nghĩ...")
+
+            // Gửi request lên server Flask
+            try {
+                const response = await fetch('/get_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fen: game.fen() })
+                });
+                
+                const data = await response.json();
+                
+                if (data.move) {
+                    game.move(data.move, { sloppy: true }); // sloppy: true cho phép đọc định dạng UCI
+                    board.position(game.fen());
+                    updateStatus();
+                } else {
+                    console.log("Bot không tìm thấy nước đi hoặc game over.");
+                }
+
+            } catch (error) {
+                console.error("Lỗi kết nối tới Bot:", error);
+                $status.html("Lỗi kết nối Server!")
+            }
+        }
+
+        var config = {
+            draggable: true,
+            position: 'start',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd,
+            // --- SỬA LỖI HÌNH ẢNH ---
+            // Trỏ đường dẫn ảnh tới server của thư viện chessboardjs
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+        }
+        
+        board = Chessboard('board', config)
+
+        $('#resetBtn').on('click', function() {
+            game.reset();
+            board.start();
+            updateStatus();
+        });
+
+        updateStatus()
+        
+        // Responsive: Resize bàn cờ khi thay đổi kích thước cửa sổ
+        $(window).resize(board.resize)
+    </script>
+</body>
+</html>
