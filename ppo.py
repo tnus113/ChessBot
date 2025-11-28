@@ -9,6 +9,7 @@ import chess.pgn
 import io
 import random
 import re
+import os
 
 from chess_utils import PolicyNetwork, ValueNetwork, board_to_tensor
 
@@ -77,6 +78,24 @@ def train_ppo_standard():
     
     # 1. Load Models (ResNet)
     actor = PolicyNetwork().to(DEVICE)
+    # --- PHẦN QUAN TRỌNG: KIỂM TRA FILE CŨ ---
+    if os.path.exists("ppo_chess_bot.pth"):
+        print(">>> TÌM THẤY MODEL PPO CŨ. ĐANG LOAD ĐỂ HỌC TIẾP...")
+        try:
+            # Load trọng số đã học lần trước vào
+            actor.load_state_dict(torch.load("ppo_chess_bot.pth", map_location=DEVICE))
+            print(">>> Load thành công! Bot sẽ tiếp tục thông minh hơn.")
+        except:
+            # Phòng trường hợp file lỗi, quay về SFT gốc
+            print("!!! File PPO lỗi. Load SFT gốc.")
+            actor.load_state_dict(torch.load("sft_policy.pth", map_location=DEVICE))
+            
+    elif os.path.exists("sft_policy.pth"):
+        # Nếu chưa từng chạy PPO, load kiến thức nền tảng SFT
+        print(">>> Chưa có file PPO. Bắt đầu mới từ SFT.")
+        actor.load_state_dict(torch.load("sft_policy.pth", map_location=DEVICE))
+    # ------------------------------------------
+
     try: actor.load_state_dict(torch.load("sft_policy.pth", map_location=DEVICE))
     except: print("Thiếu sft_policy.pth"); return
     actor.train()
@@ -98,7 +117,7 @@ def train_ppo_standard():
     
     # 2. Dataset
     ds_raw = load_dataset("Lichess/standard-chess-games", split="train", streaming=True)
-    prompt_ds = ChessPromptDataset(ds_raw, max_samples=20000, min_elo=2000)
+    prompt_ds = ChessPromptDataset(ds_raw, max_samples=50000, min_elo=2000)
     dataloader = DataLoader(prompt_ds, batch_size=1) 
     
     states, actions, logprobs, rewards = [], [], [], []
@@ -132,7 +151,9 @@ def train_ppo_standard():
                 board.push(move)
                 next_state = torch.from_numpy(board_to_tensor(board)).float().unsqueeze(0).to(DEVICE)
                 with torch.no_grad():
-                    rm_score = reward_model(next_state).item()
+                    # CŨ: rm_score = reward_model(next_state).item()
+                    raw_score = reward_model(next_state)
+                    rm_score = torch.tanh(raw_score).item()
                 # Reward tổng hợp
                 final_reward = rm_score - (KL_COEF * kl_div.item())
             else:
@@ -172,7 +193,8 @@ def train_ppo_standard():
             
             # Critic Update
             new_values = critic(b_states)
-            critic_loss = F.mse_loss(new_values, b_rewards)
+            # critic_loss = F.mse_loss(new_values, b_rewards)
+            critic_loss = F.smooth_l1_loss(new_values, b_rewards)
             
             opt_critic.zero_grad()
             critic_loss.backward()
@@ -183,11 +205,9 @@ def train_ppo_standard():
             
             if step_count % 10 == 0:
                 print(f"Update {step_count} | A_Loss: {actor_loss.item():.4f} | C_Loss: {critic_loss.item():.4f}")
-                
-            if step_count >= 1000: break
 
     torch.save(actor.state_dict(), "ppo_chess_bot.pth")
-    print(">>> Đã lưu: ppo_chess_bot.pth")
+    print(">>> Đã cập nhật file: ppo_chess_bot.pth")
 
 if __name__ == "__main__":
     train_ppo_standard()

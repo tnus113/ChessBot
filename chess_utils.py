@@ -122,7 +122,6 @@ class ValueNetwork(ChessResNet):
     def forward(self, x):
         features = self.forward_features(x)
         x = F.relu(self.fc1(features))
+        value = self.fc_value(x)
         
-        # Ép giá trị về [-1, 1] cho ổn định PPO Critic Loss
-        value = torch.tanh(self.fc_value(x))
         return value

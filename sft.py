@@ -10,6 +10,7 @@ import random
 import sys
 import time
 import re
+import os 
 
 # Import utils từ file chess_utils.py (Đã có sẵn)
 from chess_utils import PolicyNetwork, board_to_tensor, encode_move
@@ -18,7 +19,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 32
 
 class ChessStreamingDataset(IterableDataset):
-    def __init__(self, hf_dataset, max_samples=100000, min_elo=2000):
+    def __init__(self, hf_dataset, max_samples=200000, min_elo=2000):
         self.dataset = hf_dataset
         self.max_samples = max_samples
         self.min_elo = min_elo
@@ -107,11 +108,24 @@ def train_sft_standard():
         return
 
     # Train 100k mẫu
-    MAX_SAMPLES = 100000
+    MAX_SAMPLES = 200000
     train_ds = ChessStreamingDataset(dataset, max_samples=MAX_SAMPLES, min_elo=2000)
     dataloader = DataLoader(train_ds, batch_size=BATCH_SIZE)
     
     model = PolicyNetwork().to(DEVICE)
+
+    # --- THÊM ĐOẠN NÀY ĐỂ HỌC TIẾP (RESUME) ---
+    if os.path.exists("sft_policy.pth"):
+        print(">>> TÌM THẤY MODEL CŨ. ĐANG TẢI ĐỂ HỌC TIẾP...")
+        try:
+            model.load_state_dict(torch.load("sft_policy.pth", map_location=DEVICE))
+            print(">>> Đã tải thành công! Bot sẽ học tiếp từ kiến thức cũ.")
+        except:
+            print("!!! Lỗi tải model cũ (khác kiến trúc?). Sẽ train lại từ đầu.")
+    else:
+        print(">>> Không tìm thấy model cũ. Train từ đầu.")
+    # -------------------------------------------
+    
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
     
